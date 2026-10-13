@@ -1,667 +1,1047 @@
-# Learn Nestjs
+# Enterprise NestJS Architecture Masterclass (NestJS 10 & 11)
 
-This repository contains a list of Nestjs concepts, examples and best practices.
+[![NestJS Version](https://img.shields.io/badge/NestJS-10.0%20%7C%2011.0-E0234E?logo=nestjs&logoColor=white)](https://nestjs.com/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Underlying HTTP](https://img.shields.io/badge/Platform-Express%20%7C%20Fastify-blue.svg)](https://docs.nestjs.com/techniques/performance)
+[![Architecture](https://img.shields.io/badge/Architecture-Modular%20%7C%20Hexagonal%20%7C%20CQRS-orange.svg)](#stage-1-nestjs-core-architecture--the-ioc-container)
+[![Microservices](https://img.shields.io/badge/Microservices-NATS%20%7C%20Kafka%20%7C%20RabbitMQ-success.svg)](https://docs.nestjs.com/microservices/basics)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-![GitHub](https://img.shields.io/github/license/manthanank/learn-nestjs)
+> A production-grade, architectural deep dive into NestJS for enterprise backend engineers, distributed systems architects, and technical leaders. Covers dependency injection mechanics, request lifecycle pipelines, dynamic modules, CQRS, event-driven messaging, distributed microservices, and high-throughput Fastify integrations.
+
+---
+
+## Executive Summary & System Topology
+
+NestJS is a progressive Node.js framework designed to solve the structural chaos and architectural divergence endemic to unopinionated Express and Fastify codebases. By leveraging TypeScript, Inversion of Control (IoC), and design patterns inspired by Angular and Spring Framework, NestJS provides a scalable, maintainable, and testable application architecture.
+
+Enterprise backends built with NestJS adhere to five primary pillars:
+
+1. **Inversion of Control & Strong Dependency Injection**: Decouples component creation from business execution, facilitating seamless mocking, unit testing, and lifecycle-scoped memory management.
+2. **Deterministic Request Execution Pipeline**: HTTP requests flow through a strict, predictable chain: Middleware $\to$ Guards $\to$ Interceptors (Pre) $\to$ Pipes $\to$ Route Handlers $\to$ Interceptors (Post) $\to$ Exception Filters.
+3. **Platform Agnosticism**: Provides zero-cost abstraction over underlying HTTP servers, allowing seamless switching between Express (ecosystem compatibility) and Fastify (2x–3x throughput increase).
+4. **Unified Microservices Transport Layer**: Abstracting network communication across HTTP, WebSockets, gRPC, Redis, NATS, RabbitMQ, and Kafka using a consistent message pattern abstraction (`@MessagePattern`, `@EventPattern`).
+5. **Reactive Composable Streams (RxJS)**: Native integration with RxJS enables declarative request transformation, circuit breaking, retry strategies, and asynchronous event stream pipelines.
+
+```
++---------------------------------------------------------------------------------------------------+
+|                                     NESTJS REQUEST LIFECYCLE PIPELINE                             |
++---------------------------------------------------------------------------------------------------+
+|  Client HTTP / WebSocket / RPC Request                                                            |
+|        |                                                                                          |
+|        v                                                                                          |
+|  [ 1. Middleware ] (Express/Fastify level: CORS, Helmet, Request Logging, Body Parsing)           |
+|        |                                                                                          |
+|        v                                                                                          |
+|  [ 2. Guards ] (`CanActivate` - Authentication, Role/Claim Evaluation via Reflector)              |
+|        |                                                                                          |
+|        v                                                                                          |
+|  [ 3. Interceptors (Pre-Controller) ] (`NestInterceptor` - Request enrichment, tracing, metrics)  |
+|        |                                                                                          |
+|        v                                                                                          |
+|  [ 4. Pipes ] (`PipeTransform` - Body/Param Parsing, Type Coercion, Class-Validator DTOs)        |
+|        |                                                                                          |
+|        v                                                                                          |
+|  [ 5. Controller Handler ] (`@Get()`, `@Post()` - Domain Services & Business Logic Orchestration) |
+|        |                                                                                          |
+|        v                                                                                          |
+|  [ 6. Interceptors (Post-Controller) ] (RxJS operators: `map`, `tap`, `timeout`, `catchError`)     |
+|        |                                                                                          |
+|        v                                                                                          |
+|  [ 7. Exception Filters ] (`ExceptionFilter` - Global / Controller / Route error normalization)   |
+|        |                                                                                          |
+|        v                                                                                          |
+|  Client Response (Structured JSON / Problem Details / gRPC Status)                                |
++---------------------------------------------------------------------------------------------------+
+```
+
+---
+
+## Architectural Comparison Matrix
+
+| Dimension | NestJS (Express) | NestJS (Fastify) | Raw Express.js | Fastify | Spring Boot 3 (Java) |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Language & Typing** | TypeScript strict | TypeScript strict | JavaScript / Opt-in TS | JavaScript / Opt-in TS | Java 17/21 Strict |
+| **Architecture** | Opinionated Modular IoC | Opinionated Modular IoC | Unopinionated flat | Plugin architecture | Opinionated Class IoC |
+| **Throughput (req/sec)**| ~15,000 – 25,000 | ~45,000 – 65,000 | ~18,000 – 28,000 | ~50,000 – 75,000 | ~60,000 – 80,000 |
+| **Dependency Injection**| Built-in hierarchical IoC | Built-in hierarchical IoC | None (Manual wiring) | None (Plugin decorators) | Spring IoC Container |
+| **Microservices Support**| Built-in multi-transport | Built-in multi-transport | Requires external libs | Requires external libs | Spring Cloud suite |
+| **Validation Layer** | `ValidationPipe` + class-validator | `ValidationPipe` or JSON Schema | Custom middleware | Built-in Ajv JSON Schema | Hibernate Validator |
+| **Testing Ergonomics** | `@nestjs/testing` module mocks | `@nestjs/testing` module mocks | Supertest + manual mocks | `inject()` light testing | `@SpringBootTest` |
+| **Learning Curve** | Moderate (Angular-like) | Moderate (Angular-like) | Very Low | Low | Steep |
+
+---
 
 ## Table of Contents
 
-- [Introduction](#introduction)
-- [Getting Started](#getting-started)
-- [Controllers](#controllers)
-- [Providers](#providers)
-- [Modules](#modules)
-- [Middleware](#middleware)
-- [Guards](#guards)
-- [Interceptors](#interceptors)
-- [Filters](#filters)
-- [Pipes](#pipes)
-- [Exception Filters](#exception-filters)
-- [Validation Pipes](#validation-pipes)
-- [Swagger](#swagger)
-- [TypeORM](#typeorm)
-- [Mongoose](#mongoose)
-- [GraphQL](#graphql)
-- [Websockets](#websockets)
-- [Microservices](#microservices)
-- [Testing](#testing)
+1. [Stage 1: NestJS Core Architecture & The IoC Container](#stage-1-nestjs-core-architecture--the-ioc-container)
+2. [Stage 2: Modular Architecture, Dynamic Modules & Config Injection](#stage-2-modular-architecture-dynamic-modules--config-injection)
+3. [Stage 3: The Complete Execution Pipeline: Middleware, Guards, Interceptors & Pipes](#stage-3-the-complete-execution-pipeline-middleware-guards-interceptors--pipes)
+4. [Stage 4: Advanced Custom Decorators & ExecutionContext Introspection](#stage-4-advanced-custom-decorators--executioncontext-introspection)
+5. [Stage 5: Enterprise Persistence: Prisma, TypeORM & Distributed Transactions](#stage-5-enterprise-persistence-prisma-typeorm--distributed-transactions)
+6. [Stage 6: Security, Authentication, RBAC, ABAC & Throttling](#stage-6-security-authentication-rbac-abac--throttling)
+7. [Stage 7: Event-Driven Architecture, CQRS & Sagas](#stage-7-event-driven-architecture-cqrs--sagas)
+8. [Stage 8: Distributed Microservices & Message Transporters](#stage-8-distributed-microservices--message-transporters)
+9. [Stage 9: Real-Time WebSockets & BullMQ Asynchronous Task Queues](#stage-9-real-time-websockets--bullmq-asynchronous-task-queues)
+10. [Stage 10: Performance Optimization, Fastify Adapter & Production Observability](#stage-10-performance-optimization-fastify-adapter--production-observability)
+11. [Production Blueprint: Enterprise Resilient Order Management Microservice](#production-blueprint-enterprise-resilient-order-management-microservice)
+12. [Anti-Patterns & Systems Pitfalls](#anti-patterns--systems-pitfalls)
+13. [Architectural Systems Interview Q&A](#architectural-systems-interview-qa)
+14. [NestJS CLI & Configuration Reference Cheat Sheet](#nestjs-cli--configuration-reference-cheat-sheet)
 
-## Introduction
+---
 
-- Nestjs is a progressive Node.js framework for building efficient, reliable, and scalable server-side applications. It uses modern JavaScript, is built with TypeScript, and combines elements of OOP (Object Oriented Programming), FP (Functional Programming), and FRP (Functional Reactive Programming).
+## Stage 1: NestJS Core Architecture & The IoC Container
 
-- Nestjs is built on top of Express, which is a fast, unopinionated, minimalist web framework for Node.js.
+### 1.1 Inversion of Control (IoC) & The Dependency Injection Container
 
-## Getting Started
-
-- Install Nestjs CLI globally
-
-```bash
-npm i -g @nestjs/cli
-```
-
-- Create a new Nestjs project
-
-```bash
-nest new project-name
-```
-
-- Start the Nestjs project
-
-```bash
-cd project-name
-npm run start
-```
-
-- Open the browser and navigate to `http://localhost:3000`
-
-## Controllers
-
-- Controllers are responsible for handling incoming requests and returning responses to the client.
-
-- Create a new controller
-
-```bash
-nest generate controller controller-name
-```
-
-- Example of a controller
+At the heart of NestJS is an IoC container managed by the `@nestjs/core` runtime. Instead of classes instantiating their own dependencies via `new`, dependencies are registered as providers and injected via constructors using TypeScript parameter type reflection (`reflect-metadata`).
 
 ```typescript
-import { Controller, Get } from '@nestjs/common';
+import { Injectable, Scope } from '@nestjs/common';
 
-@Controller('cats')
-export class CatsController {
-  @Get()
-  findAll(): string {
-    return 'This action returns all cats';
+export interface AuditLog {
+  action: string;
+  userId: string;
+  timestamp: Date;
+}
+
+@Injectable({ scope: Scope.DEFAULT }) // Singleton by default
+export class AuditService {
+  private readonly logs: AuditLog[] = [];
+
+  record(action: string, userId: string): void {
+    this.logs.push({ action, userId, timestamp: new Date() });
+  }
+
+  getLogs(): readonly AuditLog[] {
+    return this.logs;
   }
 }
 ```
 
-## Providers
+### 1.2 Provider Scopes and Memory Footprint
 
-- Providers are a fundamental concept in Nestjs. They are used to create services, repositories, factories, helpers, and other reusable components.
+NestJS supports three provider scopes:
+- **`Scope.DEFAULT` (Singleton)**: A single instance is cached and shared across the entire application process. Fastest performance, zero allocation overhead per request.
+- **`Scope.REQUEST` (Request-Scoped)**: A new instance is created for every incoming HTTP request and garbage collected when the request completes.
+  > [!WARNING]
+  > Request scoping is "infectious". If a singleton service injects a request-scoped provider, the singleton service is forced into request-scoped mode. In high-traffic services, creating thousands of class instances per second triggers severe V8 GC pressure and latency degradation.
+- **`Scope.TRANSIENT`**: A dedicated instance is created for each class that injects it.
 
-- Create a new provider
+### 1.3 Resolving Circular Dependencies via `forwardRef()`
 
-```bash
-nest generate provider provider-name
-```
-
-- Example of a provider
+When Service A injects Service B and Service B injects Service A, NestJS cannot resolve the dependency graph without explicit forward referencing:
 
 ```typescript
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 
 @Injectable()
-export class CatsService {
-  private readonly cats: string[] = ['Cat 1', 'Cat 2', 'Cat 3'];
+export class OrderService {
+  constructor(
+    @Inject(forwardRef(() => PaymentService))
+    private readonly paymentService: PaymentService,
+  ) {}
+}
 
-  findAll(): string[] {
-    return this.cats;
-  }
+@Injectable()
+export class PaymentService {
+  constructor(
+    @Inject(forwardRef(() => OrderService))
+    private readonly orderService: OrderService,
+  ) {}
 }
 ```
 
-## Modules
+---
 
-- Modules are used to organize the application structure. They are used to group related controllers, providers, and other components.
+## Stage 2: Modular Architecture, Dynamic Modules & Config Injection
 
-- Create a new module
+### 2.1 The Module Graph Architecture
 
-```bash
-nest generate module module-name
-```
-
-- Example of a module
+NestJS organizes applications into cohesive modules using the `@Module()` decorator. Every application has a root `AppModule` that acts as the entry point for the dependency graph:
 
 ```typescript
-import { Module } from '@nestjs/common';
-import { CatsController } from './cats.controller';
-import { CatsService } from './cats.service';
+import { Module, Global } from '@nestjs/common';
+import { DatabaseService } from './database.service';
 
+@Global() // Makes providers universally available without re-importing
 @Module({
-  controllers: [CatsController],
-  providers: [CatsService],
+  providers: [DatabaseService],
+  exports: [DatabaseService],
 })
-export class CatsModule {}
+export class CoreDatabaseModule {}
 ```
 
-## Middleware
+### 2.2 Designing Production Dynamic Modules
 
-- Middleware functions are functions that have access to the request object (req), the response object (res), and the next middleware function in the application’s request-response cycle.
-
-- Create a new middleware
-
-```bash
-nest generate middleware middleware-name
-```
-
-Example of a middleware
+Dynamic modules allow modules to be configured asynchronously with options (e.g. database credentials from environment variables) via `forRoot()` or `forRootAsync()`:
 
 ```typescript
-import { Injectable, NestMiddleware } from '@nestjs/common';
-import { Request, Response } from 'express';
+import { DynamicModule, Module, Provider } from '@nestjs/common';
 
-@Injectable()
-export class LoggerMiddleware implements NestMiddleware {
-  use(req: Request, res: Response, next: Function) {
-    console.log('Request...');
-    next();
+export interface RedisModuleOptions {
+  host: string;
+  port: number;
+  password?: string;
+}
+
+export interface RedisAsyncOptions {
+  useFactory: (...args: any[]) => Promise<RedisModuleOptions> | RedisModuleOptions;
+  inject?: any[];
+}
+
+export const REDIS_CLIENT = 'REDIS_CLIENT';
+
+@Module({})
+export class RedisModule {
+  static forRoot(options: RedisModuleOptions): DynamicModule {
+    const clientProvider: Provider = {
+      provide: REDIS_CLIENT,
+      useValue: new MockRedisClient(options),
+    };
+
+    return {
+      module: RedisModule,
+      providers: [clientProvider],
+      exports: [clientProvider],
+    };
   }
+
+  static forRootAsync(options: RedisAsyncOptions): DynamicModule {
+    const clientProvider: Provider = {
+      provide: REDIS_CLIENT,
+      useFactory: async (...args: any[]) => {
+        const config = await options.useFactory(...args);
+        return new MockRedisClient(config);
+      },
+      inject: options.inject || [],
+    };
+
+    return {
+      module: RedisModule,
+      imports: [],
+      providers: [clientProvider],
+      exports: [clientProvider],
+    };
+  }
+}
+
+class MockRedisClient {
+  constructor(private readonly opts: RedisModuleOptions) {}
+  ping() { return `Connected to ${this.opts.host}:${this.opts.port}`; }
 }
 ```
 
-## Guards
+---
 
-- Guards are used to protect routes from unauthorized access.
+## Stage 3: The Complete Execution Pipeline: Middleware, Guards, Interceptors & Pipes
 
-- Create a new guard
+### 3.1 The Execution Chain Sequence
 
-```bash
-nest generate guard guard-name
-```
+Understanding the exact sequence in which request interceptors fire is vital for correct debugging:
 
-- Example of a guard
+1. **Global Middleware $\to$ Module Middleware**
+2. **Global Guards $\to$ Controller Guards $\to$ Route Guards**
+3. **Global Interceptors (Pre) $\to$ Controller Interceptors (Pre) $\to$ Route Interceptors (Pre)**
+4. **Global Pipes $\to$ Controller Pipes $\to$ Route Pipes $\to$ Route Parameter Pipes**
+5. **Controller Handler Execution (Business logic)**
+6. **Route Interceptors (Post) $\to$ Controller Interceptors (Post) $\to$ Global Interceptors (Post)**
+7. **Exception Filters (Route $\to$ Controller $\to$ Global)**
+
+### 3.2 Production Guard with Reflector Metadata (RBAC)
 
 ```typescript
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
-import { Observable } from 'rxjs';
+import { Reflector } from '@nestjs/core';
+
+export const ROLES_KEY = 'roles';
+export enum Role {
+  USER = 'user',
+  ADMIN = 'admin',
+  SYSTEM = 'system',
+}
 
 @Injectable()
-export class AuthGuard implements CanActivate {
-  canActivate(
-    context: ExecutionContext,
-  ): boolean | Promise<boolean> | Observable<boolean> {
-    const request = context.switchToHttp().getRequest();
-    return validateRequest(request);
-  }
-}
-```
+export class RolesGuard implements CanActivate {
+  constructor(private readonly reflector: Reflector) {}
 
-## Interceptors
+  canActivate(context: ExecutionContext): boolean {
+    const requiredRoles = this.reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
 
-- Interceptors are used to intercept incoming requests and outgoing responses.
-
-- Create a new interceptor
-
-```bash
-nest generate interceptor interceptor-name
-```
-
-- Example of an interceptor
-
-```typescript
-import { Injectable, NestInterceptor, ExecutionContext, CallHandler } from '@nestjs/common';
-import { Observable } from 'rxjs';
-
-@Injectable()
-export class LoggingInterceptor implements NestInterceptor {
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    console.log('Before...');
-    const now = Date.now();
-    return next
-      .handle()
-      .pipe(tap(() => console.log(`After... ${Date.now() - now}ms`)));
-  }
-}
-```
-
-## Filters
-
-- Filters are used to handle exceptions that are thrown during the execution of the application.
-
-- Create a new filter
-
-```bash
-nest generate filter filter-name
-```
-
-- Example of a filter
-
-```typescript
-```typescript
-import { ExceptionFilter, Catch, ArgumentsHost } from '@nestjs/common';
-
-@Catch(HttpException)
-export class HttpExceptionFilter implements ExceptionFilter {
-    catch(exception: HttpException, host: ArgumentsHost) {
-        const ctx = host.switchToHttp();
-        const response = ctx.getResponse();
-        const request = ctx.getRequest();
-
-        const status = exception.getStatus();
-
-        response
-            .status(status)
-            .json({
-                statusCode: status,
-                timestamp: new Date().toISOString(),
-            });
+    if (!requiredRoles || requiredRoles.length === 0) {
+      return true; // No roles required
     }
+
+    const { user } = context.switchToHttp().getRequest();
+    return requiredRoles.some((role) => user?.roles?.includes(role));
+  }
 }
 ```
 
-## Pipes
-
-- Pipes are used to transform input data to the desired output.
-
-- Create a new pipe
-
-```bash
-nest generate pipe pipe-name
-```
-
-- Example of a pipe
+### 3.3 Interceptor for Response Normalization & Latency Profiling
 
 ```typescript
-import { PipeTransform, Injectable, ArgumentMetadata } from '@nestjs/common';
+import {
+  Injectable,
+  NestInterceptor,
+  ExecutionContext,
+  CallHandler,
+} from '@nestjs/common';
+import { Observable } from 'rxjs';
+import { map, tap } from 'rxjs/operators';
+
+export interface StandardApiResponse<T> {
+  statusCode: number;
+  data: T;
+  executionDurationMs: number;
+  timestamp: string;
+}
 
 @Injectable()
-export class ValidationPipe implements PipeTransform {
-  transform(value: any, metadata: ArgumentMetadata) {
-    return value;
+export class ResponseTransformInterceptor<T>
+  implements NestInterceptor<T, StandardApiResponse<T>>
+{
+  intercept(context: ExecutionContext, next: CallHandler): Observable<StandardApiResponse<T>> {
+    const start = Date.now();
+    const httpCtx = context.switchToHttp();
+    const response = httpCtx.getResponse();
+
+    return next.handle().pipe(
+      map((data) => ({
+        statusCode: response.statusCode,
+        data,
+        executionDurationMs: Date.now() - start,
+        timestamp: new Date().toISOString(),
+      })),
+    );
   }
 }
 ```
 
-## Exception Filters
-
-- Exception filters are used to handle exceptions that are thrown during the execution of the application.
-
-- Create a new exception filter
-
-```bash
-nest generate filter exception-filter-name
-```
-
-- Example of an exception filter
+### 3.4 Exception Filter with Problem Details (RFC 7807)
 
 ```typescript
-import { ExceptionFilter, Catch, ArgumentsHost } from '@nestjs/common';
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
+import { Request, Response } from 'express';
 
-@Catch(HttpException)
-export class HttpExceptionFilter implements ExceptionFilter {
-    catch(exception: HttpException, host: ArgumentsHost) {
-        const ctx = host.switchToHttp();
-        const response = ctx.getResponse();
-        const request = ctx.getRequest();
+@Catch()
+export class GlobalExceptionFilter implements ExceptionFilter {
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
 
-        const status = exception.getStatus();
+    const status =
+      exception instanceof HttpException
+        ? exception.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
 
-        response
-            .status(status)
-            .json({
-                statusCode: status,
-                timestamp: new Date().toISOString(),
-            });
-    }
-}
-```
+    const message =
+      exception instanceof HttpException
+        ? exception.getResponse()
+        : 'Internal server error occurred';
 
-## Validation Pipes
-
-- Validation pipes are used to validate the input data.
-
-- Create a new validation pipe
-
-```bash
-nest generate pipe validation-pipe-name
-```
-
-- Example of a validation pipe
-
-```typescript
-import { PipeTransform, Injectable, ArgumentMetadata } from '@nestjs/common';
-
-@Injectable()
-export class ValidationPipe implements PipeTransform {
-  transform(value: any, metadata: ArgumentMetadata) {
-    return value;
+    response.status(status).json({
+      type: `https://httpstatuses.com/${status}`,
+      title: HttpStatus[status],
+      status,
+      detail: typeof message === 'string' ? message : (message as any).message || message,
+      instance: request.url,
+      timestamp: new Date().toISOString(),
+    });
   }
 }
 ```
 
-## Swagger
+---
 
-- Swagger is a tool that helps you document your API.
+## Stage 4: Advanced Custom Decorators & ExecutionContext Introspection
 
-- Install Swagger
+### 4.1 Custom Parameter Decorators
 
-```bash
-npm install --save @nestjs/swagger swagger-ui-express
-```
-
-- Add Swagger to the application
+Custom parameter decorators extract and validate request metadata without cluttering route signatures:
 
 ```typescript
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 
-const app = await NestFactory.create(AppModule);
-
-const config = new DocumentBuilder()
-  .setTitle('Nestjs API')
-  .setDescription('The Nestjs API description')
-  .setVersion('1.0')
-  .addTag('nestjs')
-  .build();
-
-const document = SwaggerModule.createDocument(app, config);
-SwaggerModule.setup('api', app, document);
-
-await app.listen(3000);
-```
-
-- Open the browser and navigate to `http://localhost:3000/api`
-
-## TypeORM
-
-- TypeORM is an Object Relational Mapping (ORM) library for TypeScript.
-
-- Install TypeORM
-
-```bash
-npm install --save @nestjs/typeorm typeorm mysql
-```
-
-- Create a new entity
-
-```typescript
-import { Entity, Column, PrimaryGeneratedColumn } from 'typeorm';
-
-@Entity()
-export class Cat {
-  @PrimaryGeneratedColumn()
-  id: number;
-
-  @Column()
-  name: string;
-
-  @Column()
-  age: number;
+export interface AuthenticatedUser {
+  id: string;
+  email: string;
+  roles: string[];
 }
-```
 
-- Create a new repository
+export const CurrentUser = createParamDecorator(
+  (data: keyof AuthenticatedUser | undefined, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest();
+    const user: AuthenticatedUser = request.user;
 
-```typescript
-import { EntityRepository, Repository } from 'typeorm';
-import { Cat } from './cat.entity';
-
-@EntityRepository(Cat)
-export class CatRepository extends Repository<Cat> {}
-```
-
-- Use the repository in the service
-
-```typescript
-import { Injectable } from '@nestjs/common';
-import { CatRepository } from './cat.repository';
-
-@Injectable()
-export class CatService {
-  constructor(private readonly catRepository: CatRepository) {}
-
-  async findAll(): Promise<Cat[]> {
-    return this.catRepository.find();
-  }
-}
-```
-
-## Mongoose
-
-- Mongoose is an Object Data Modeling (ODM) library for MongoDB and Node.js.
-
-- Install Mongoose
-
-```bash
-npm install --save @nestjs/mongoose mongoose
-```
-
-- Create a new schema
-
-```typescript
-import * as mongoose from 'mongoose';
-
-export const CatSchema = new mongoose.Schema({
-  name: String,
-  age: Number,
-});
-```
-
-- Create a new model
-
-```typescript
-import { Document } from 'mongoose';
-
-export interface Cat extends Document {
-  name: string;
-  age: number;
-}
-```
-
-- Use the model in the service
-
-```typescript
-import { Injectable } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
-import { Cat } from './cat.model';
-
-@Injectable()
-export class CatService {
-  constructor(@InjectModel('Cat') private readonly catModel: Model<Cat>) {}
-
-  async findAll(): Promise<Cat[]> {
-    return this.catModel.find().exec();
-  }
-}
-```
-
-## GraphQL
-
-- GraphQL is a query language for APIs.
-
-- Install GraphQL
-
-```bash
-npm install --save @nestjs/graphql graphql-tools graphql apollo-server-express
-```
-
-- Create a new resolver
-
-```typescript
-import { Resolver, Query } from '@nestjs/graphql';
-
-@Resolver('Cat')
-export class CatResolver {
-  @Query()
-  async cats() {
-    return [];
-  }
-}
-```
-
-- Create a new schema
-
-```typescript
-import { buildSchema } from 'type-graphql';
-
-export const schema = buildSchema({
-  resolvers: [CatResolver],
-});
-```
-
-- Add GraphQL to the application
-
-```typescript
-import { GraphQLModule } from '@nestjs/graphql';
-import { schema } from './schema';
-
-const app = await NestFactory.create(AppModule);
-
-app.use(
-  '/graphql',
-  GraphQLModule.forRoot({
-    schema,
-  }),
+    return data ? user?.[data] : user;
+  },
 );
-
-await app.listen(3000);
 ```
 
-- Open the browser and navigate to `http://localhost:3000/graphql`
+### 4.2 Custom Parameter Decorator with Pipes
 
-## Websockets
-
-- Websockets are used to establish a two-way communication channel between the client and the server.
-
-- Install Websockets
-
-```bash
-npm install --save @nestjs/websockets socket.io
-```
-
-- Create a new gateway
+Decorators can be combined directly with validation pipes in method signatures:
 
 ```typescript
-import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import { Param, ParseUUIDPipe } from '@nestjs/common';
 
-@WebSocketGateway()
-export class AppGateway {
-  @WebSocketServer() server;
-}
-```
-
-- Use the gateway in the controller
-
-```typescript
-import { Controller, Get } from '@nestjs/common';
-import { AppGateway } from './app.gateway';
-
-@Controller()
-export class AppController {
-  constructor(private readonly appGateway: AppGateway) {}
-
-  @Get()
-  async findAll(): Promise<string> {
-    this.appGateway.server.emit('events', 'Hello World');
-    return 'Hello World';
+@Controller('users')
+export class UserController {
+  @Get(':id')
+  async getUser(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return { id, requestedBy: user.id };
   }
 }
 ```
 
-## Microservices
+### 4.3 Multi-Protocol Support via `ArgumentsHost`
 
-- Microservices are used to build distributed systems.
+NestJS components can run across HTTP, WebSockets, and RPC Microservices simultaneously. The `ArgumentsHost` abstraction inspects the execution runtime dynamically:
 
-- Install Microservices
+```typescript
+import { ArgumentsHost, Injectable } from '@nestjs/common';
 
-```bash
-npm install --save @nestjs/microservices
+@Injectable()
+export class MultiProtocolInspector {
+  inspect(host: ArgumentsHost): void {
+    const type = host.getType(); // 'http' | 'ws' | 'rpc'
+
+    if (type === 'http') {
+      const req = host.switchToHttp().getRequest();
+      console.log(`[HTTP] Path: ${req.url}`);
+    } else if (type === 'ws') {
+      const client = host.switchToWs().getClient();
+      console.log(`[WS] Client ID: ${client.id}`);
+    } else if (type === 'rpc') {
+      const data = host.switchToRpc().getData();
+      console.log(`[RPC] Message payload:`, data);
+    }
+  }
+}
 ```
 
-- Create a new microservice
+---
+
+## Stage 5: Enterprise Persistence: Prisma, TypeORM & Distributed Transactions
+
+### 5.1 Prisma Integration via Service Lifecycle Hooks
+
+Prisma provides type-safe query generation with compile-time SQL validation:
+
+```typescript
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+
+@Injectable()
+export class PrismaService
+  extends PrismaClient
+  implements OnModuleInit, OnModuleDestroy
+{
+  async onModuleInit(): Promise<void> {
+    await this.$connect();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.$disconnect();
+  }
+}
+```
+
+### 5.2 Unit of Work & Transaction Management
+
+In enterprise operations, creating an order and charging an inventory ledger must execute within an atomic transaction:
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from './prisma.service';
+
+@Injectable()
+export class OrderFulfillmentService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async createOrderWithLedger(userId: string, items: { sku: string; qty: number }[], amount: number) {
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Decrement inventory
+      for (const item of items) {
+        const inventory = await tx.inventory.update({
+          where: { sku: item.sku },
+          data: { availableQty: { decrement: item.qty } },
+        });
+
+        if (inventory.availableQty < 0) {
+          throw new Error(`Insufficient stock for SKU ${item.sku}`);
+        }
+      }
+
+      // 2. Insert order record
+      const order = await tx.order.create({
+        data: {
+          userId,
+          totalAmount: amount,
+          status: 'CONFIRMED',
+        },
+      });
+
+      return order;
+    });
+  }
+}
+```
+
+---
+
+## Stage 6: Security, Authentication, RBAC, ABAC & Throttling
+
+### 6.1 JWT Bearer Strategy with Passport.js
+
+```typescript
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { ConfigService } from '@nestjs/config';
+
+export interface JwtPayload {
+  sub: string;
+  email: string;
+  roles: string[];
+}
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(configService: ConfigService) {
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ignoreExpiration: false,
+      secretOrKey: configService.get<string>('JWT_SECRET') || 'default-jwt-secret-key-32b',
+    });
+  }
+
+  async validate(payload: JwtPayload) {
+    if (!payload.sub) {
+      throw new UnauthorizedException('Invalid token credentials');
+    }
+    return { id: payload.sub, email: payload.email, roles: payload.roles };
+  }
+}
+```
+
+### 6.2 Attribute-Based Access Control (ABAC) with CASL
+
+For granular policies (e.g., "Users can edit only orders they created"):
+
+```typescript
+import { AbilityBuilder, createMongoAbility, MongoAbility } from '@casl/ability';
+import { Injectable } from '@nestjs/common';
+
+export type Action = 'manage' | 'create' | 'read' | 'update' | 'delete';
+export type AppAbility = MongoAbility<[Action, any]>;
+
+@Injectable()
+export class CaslAbilityFactory {
+  createForUser(user: { id: string; isAdmin: boolean }): AppAbility {
+    const { can, cannot, build } = new AbilityBuilder<AppAbility>(createMongoAbility);
+
+    if (user.isAdmin) {
+      can('manage', 'all');
+    } else {
+      can('read', 'Order');
+      can('update', 'Order', { customerId: user.id }); // Field-level guard
+      cannot('delete', 'Order');
+    }
+
+    return build();
+  }
+}
+```
+
+### 6.3 Rate Limiting via `@nestjs/throttler`
+
+Protect public APIs against brute force attacks and denial of service:
+
+```typescript
+import { Module } from '@nestjs/common';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { APP_GUARD } from '@nestjs/core';
+
+@Module({
+  imports: [
+    ThrottlerModule.forRoot([
+      {
+        name: 'short',
+        ttl: 1000, // 1 second
+        limit: 3,  // 3 requests per second
+      },
+      {
+        name: 'medium',
+        ttl: 10000, // 10 seconds
+        limit: 20,
+      },
+    ]),
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+  ],
+})
+export class SecurityModule {}
+```
+
+---
+
+## Stage 7: Event-Driven Architecture, CQRS & Sagas
+
+### 7.1 Command Query Responsibility Segregation (CQRS)
+
+CQRS splits complex domain logic into distinct read models and write models via `@nestjs/cqrs`:
+
+```typescript
+import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
+import { Injectable } from '@nestjs/common';
+
+export class CancelOrderCommand {
+  constructor(public readonly orderId: string, public readonly reason: string) {}
+}
+
+@Injectable()
+@CommandHandler(CancelOrderCommand)
+export class CancelOrderHandler implements ICommandHandler<CancelOrderCommand> {
+  async execute(command: CancelOrderCommand): Promise<{ status: string }> {
+    console.log(`[CQRS] Cancelling order ${command.orderId} for reason: ${command.reason}`);
+    // Emit domain event or persist state
+    return { status: 'CANCELLED' };
+  }
+}
+```
+
+### 7.2 Complex Sagas with RxJS Operators
+
+Sagas orchestrate long-running distributed workflows across multiple microservice boundaries:
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { Saga, ICommand, ofType } from '@nestjs/cqrs';
+import { Observable } from 'rxjs';
+import { map, delay } from 'rxjs/operators';
+
+export class OrderCreatedEvent {
+  constructor(public readonly orderId: string, public readonly userId: string) {}
+}
+
+export class SendWelcomeEmailCommand implements ICommand {
+  constructor(public readonly userId: string) {}
+}
+
+@Injectable()
+export class OrderSagas {
+  @Saga()
+  orderCreated = (events$: Observable<any>): Observable<ICommand> => {
+    return events$.pipe(
+      ofType(OrderCreatedEvent),
+      delay(500), // Delay notification
+      map((event) => new SendWelcomeEmailCommand(event.userId)),
+    );
+  };
+}
+```
+
+---
+
+## Stage 8: Distributed Microservices & Message Transporters
+
+### 8.1 Hybrid Applications (HTTP API Gateway + Microservice Transit)
+
+A single NestJS application can simultaneously expose REST APIs and listen to distributed message queues (NATS, Kafka, RabbitMQ):
 
 ```typescript
 import { NestFactory } from '@nestjs/core';
-import { Transport } from '@nestjs/microservices';
+import { Transport, MicroserviceOptions } from '@nestjs/microservices';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.createMicroservice(AppModule, {
-    transport: Transport.TCP,
+  const app = await NestFactory.create(AppModule);
+
+  // Connect Kafka Microservice Transporter
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.KAFKA,
+    options: {
+      client: {
+        brokers: ['kafka.internal:9092'],
+      },
+      consumer: {
+        groupId: 'order-consumer-cluster',
+      },
+    },
   });
 
-  app.listen(() => console.log('Microservice is listening'));
+  // Start both microservice listeners and HTTP server
+  await app.startAllMicroservices();
+  await app.listen(3000);
+  console.log('[System] Hybrid Gateway active on port 3000');
 }
-
 bootstrap();
 ```
 
-- Use the microservice in the controller
+### 8.2 Event Pattern vs Message Pattern
+
+- **`@MessagePattern('topic')`**: Request-Response pattern. The publisher awaits an explicit response value from the handler.
+- **`@EventPattern('topic')`**: Fire-and-forget event broadcast. The publisher does not await a response.
 
 ```typescript
-import { Controller, Get } from '@nestjs/common';
-import { Client, ClientProxy, Transport } from '@nestjs/microservices';
+import { Controller } from '@nestjs/common';
+import { MessagePattern, EventPattern, Payload } from '@nestjs/microservices';
 
 @Controller()
-export class AppController {
-  @Client({
-    transport: Transport.TCP,
-  })
-  client: ClientProxy;
+export class PaymentMessageController {
+  @MessagePattern('payments.process')
+  handlePaymentRequest(@Payload() data: { orderId: string; amount: number }) {
+    console.log(`[RPC] Processing payment for order ${data.orderId}`);
+    return { transactionId: 'TX-99881', authorized: true };
+  }
 
-  @Get()
-  async findAll(): Promise<string> {
-    return this.client.send<string>('events', 'Hello World');
+  @EventPattern('analytics.track_event')
+  handleAnalyticsEvent(@Payload() event: { name: string; timestamp: number }) {
+    console.log(`[Event Broadcast] Logged metric: ${event.name}`);
   }
 }
 ```
 
-## Testing
+---
 
-- Testing is an important part of the development process.
+## Stage 9: Real-Time WebSockets & BullMQ Asynchronous Task Queues
 
-- Install Jest
-
-```bash
-npm install --save @nestjs/testing @nestjs/schematics jest
-```
-
-- Create a new test
+### 9.1 Scalable WebSockets with Socket.io & Redis Adapter
 
 ```typescript
-import { Test, TestingModule } from '@nestjs/testing';
-import { CatsService } from './cats.service';
+import {
+  WebSocketGateway,
+  WebSocketServer,
+  SubscribeMessage,
+  MessageBody,
+  ConnectedSocket,
+} from '@nestjs/websockets';
+import { Server, Socket } from 'socket.io';
 
-describe('CatsService', () => {
-  let service: CatsService;
+@WebSocketGateway({ cors: { origin: '*' }, namespace: 'telemetry' })
+export class TelemetryGateway {
+  @WebSocketServer()
+  server: Server;
 
-  beforeEach(async () => {
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [CatsService],
-    }).compile();
+  @SubscribeMessage('subscribe_market')
+  handleJoinRoom(@MessageBody() symbol: string, @ConnectedSocket() client: Socket) {
+    client.join(`market:${symbol}`);
+    client.emit('subscribed', { status: 'OK', room: `market:${symbol}` });
+  }
 
-    service = module.get<CatsService>(CatsService);
-  });
-
-  it('should be defined', () => {
-    expect(service).toBeDefined();
-  });
-});
+  broadcastPriceUpdate(symbol: string, price: number) {
+    this.server.to(`market:${symbol}`).emit('price_tick', { symbol, price, ts: Date.now() });
+  }
+}
 ```
 
-- Run the tests
+### 9.2 High-Performance BullMQ Task Queuing
+
+For computationally heavy tasks (PDF generation, media transcoding, batch exports), BullMQ offloads execution to Redis workers:
+
+```typescript
+import { Injectable } from '@nestjs/common';
+import { Queue } from 'bullmq';
+import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
+import { Job } from 'bullmq';
+
+export const EXPORT_QUEUE = 'export-jobs';
+
+@Injectable()
+export class ReportSchedulerService {
+  constructor(@InjectQueue(EXPORT_QUEUE) private readonly exportQueue: Queue) {}
+
+  async scheduleCsvExport(reportId: string, filterCriteria: Record<string, any>) {
+    return this.exportQueue.add(
+      'generate-csv',
+      { reportId, filterCriteria },
+      { attempts: 3, backoff: { type: 'exponential', delay: 2000 } },
+    );
+  }
+}
+
+@Processor(EXPORT_QUEUE)
+export class ExportJobProcessor extends WorkerHost {
+  async process(job: Job<{ reportId: string }>): Promise<string> {
+    console.log(`[BullMQ Worker] Generating report: ${job.data.reportId} (Attempt: ${job.attemptsMade})`);
+    // Intensive CSV generation logic...
+    return `https://s3.internal/exports/${job.data.reportId}.csv`;
+  }
+}
+```
+
+---
+
+## Stage 10: Performance Optimization, Fastify Adapter & Production Observability
+
+### 10.1 Migrating to Fastify for Ultra-High Throughput
+
+By default, NestJS uses Express. Switching to Fastify boosts raw throughput by 200%–300%:
+
+```typescript
+import { NestFactory } from '@nestjs/core';
+import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
+import { AppModule } from './app.module';
+
+async function bootstrap() {
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ logger: false }),
+  );
+
+  await app.listen(3000, '0.0.0.0');
+}
+bootstrap();
+```
+
+### 10.2 Structured JSON Logging with NestJS-Pino
+
+Never use `console.log` in production. Structured JSON logging enables rapid filtering in Datadog, Grafana Loki, and Elasticsearch:
+
+```typescript
+import { Module } from '@nestjs/common';
+import { LoggerModule } from 'nestjs-pino';
+
+@Module({
+  imports: [
+    LoggerModule.forRoot({
+      pinoHttp: {
+        level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+        transport: process.env.NODE_ENV !== 'production' ? { target: 'pino-pretty' } : undefined,
+      },
+    }),
+  ],
+})
+export class ObservabilityModule {}
+```
+
+---
+
+## Production Blueprint: Enterprise Resilient Order Management Microservice
+
+Below is an enterprise, end-to-end NestJS microservice architecture featuring validation pipes, custom decorators, role guards, DTOs, and exception filters:
+
+```typescript
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  Param,
+  UseGuards,
+  UsePipes,
+  ValidationPipe,
+  HttpCode,
+  HttpStatus,
+  Injectable,
+} from '@nestjs/common';
+import { IsNotEmpty, IsNumber, IsString, Min } from 'class-validator';
+
+// 1. Data Transfer Object (DTO)
+export class CreateOrderDto {
+  @IsString()
+  @IsNotEmpty()
+  readonly customerId: string;
+
+  @IsNumber()
+  @Min(0.01)
+  readonly amount: number;
+}
+
+// 2. Domain Service
+@Injectable()
+export class OrderService {
+  private readonly orders = new Map<string, { id: string; customerId: string; amount: number; status: string }>();
+
+  async create(dto: CreateOrderDto) {
+    const orderId = `ORD-${Date.now()}`;
+    const order = { id: orderId, customerId: dto.customerId, amount: dto.amount, status: 'CREATED' };
+    this.orders.set(orderId, order);
+    return order;
+  }
+
+  async findById(orderId: string) {
+    return this.orders.get(orderId) || null;
+  }
+}
+
+// 3. Controller
+@Controller('api/v1/orders')
+export class OrderController {
+  constructor(private readonly orderService: OrderService) {}
+
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }))
+  async createOrder(@Body() dto: CreateOrderDto) {
+    return this.orderService.create(dto);
+  }
+
+  @Get(':id')
+  async getOrder(@Param('id') id: string) {
+    const order = await this.orderService.findById(id);
+    if (!order) {
+      throw new Error(`Order ${id} not found`);
+    }
+    return order;
+  }
+}
+```
+
+---
+
+## Anti-Patterns & Systems Pitfalls
+
+| Anti-Pattern | Description | Structural Consequence | NestJS Remediation |
+| :--- | :--- | :--- | :--- |
+| **Pervasive Request Scope** | Marking multiple database services `@Injectable({ scope: Scope.REQUEST })`. | Allocates thousands of class instances per second; triggers severe V8 GC pauses. | Keep services Singleton (`Scope.DEFAULT`); pass request context via method arguments. |
+| **Unbounded BullMQ Queues** | Enqueuing millions of tasks without dead-letter limits or deduplication. | Redis memory exhausts, leading to `OOM command not allowed` exceptions. | Configure `removeOnComplete`, `removeOnFail`, and `attempts: 3` with backoff. |
+| **Direct Express API Usage** | Accessing `res.status().send()` directly in route handlers. | Breaks Fastify adapter portability; inhibits interceptor response serialization. | Return plain JavaScript objects/promises and use NestJS decorators (`@HttpCode`). |
+| **Missing Pipe Whitelisting** | Leaving `whitelist: false` in `ValidationPipe`. | Malicious clients inject arbitrary fields into DTOs (Prototype Pollution / Over-posting). | Always pass `{ whitelist: true, forbidNonWhitelisted: true }` to `ValidationPipe`. |
+| **Circular Module Imports** | Module A imports Module B while Module B imports Module A. | Fails runtime dependency graph assembly during container boot. | Decouple shared entities into a common `SharedCoreModule` or use `forwardRef()`. |
+| **Uncaught RxJS Stream Errors**| Failing to handle errors inside custom interceptor RxJS streams. | Request hangs indefinitely; socket remains open until client gateway timeout. | Always append `catchError()` operator to RxJS execution pipelines. |
+| **Blocking Event Loop in Handlers**| Executing heavy synchronous hashing or JSON parsing in controller handlers. | Blocks Node.js event loop for all concurrent connections, collapsing throughput. | Offload CPU-intensive operations to Worker Threads or BullMQ background workers. |
+
+---
+
+## Architectural Systems Interview Q&A
+
+### Q1: What is the exact execution order of NestJS request lifecycle components?
+**Answer**:
+1. **Middleware**: Executes first at the underlying HTTP server layer (Express/Fastify).
+2. **Guards**: Evaluates `canActivate()`. Used for authentication and role-based permissions.
+3. **Interceptors (Pre-handler)**: Transforms request context, starts latency timers, or injects distributed tracing spans.
+4. **Pipes**: Validates and transforms request payloads (`body`, `query`, `param`) using DTOs.
+5. **Route Handler**: Executes controller method and domain business logic.
+6. **Interceptors (Post-handler)**: Transforms outgoing response objects using RxJS operators (`map`, `tap`).
+7. **Exception Filters**: Catches and formats unhandled exceptions into structured error responses.
+
+### Q2: Why should you avoid `Scope.REQUEST` whenever possible?
+**Answer**:
+`Scope.REQUEST` forces NestJS to instantiate a brand new instance of the provider for every single incoming HTTP request. Crucially, request scoping is infectious: any singleton provider that injects a request-scoped provider automatically becomes request-scoped itself. Under heavy load (e.g. 20,000 req/sec), allocating and deallocating tens of thousands of service instances floods the V8 garbage collector, causing frequent Stop-The-World GC pauses and tail latency spikes.
+
+### Q3: How does NestJS achieve platform independence between Express and Fastify?
+**Answer**:
+NestJS uses the **Adapter Pattern** implemented via `AbstractHttpAdapter`. Core decorators (`@Get`, `@Post`, `@Body`, `@Param`) interact with the abstraction layer rather than underlying framework primitives. By swapping `new ExpressAdapter()` with `new FastifyAdapter()` during `NestFactory.create()`, the entire application runs on Fastify's high-speed engine without modifying business controllers.
+
+### Q4: What is the purpose of `Reflector` in NestJS?
+**Answer**:
+`Reflector` is a helper class used to retrieve metadata attached to classes or route handlers via custom decorators (e.g. `@SetMetadata('roles', ['admin'])`). Guards and interceptors use `reflector.getAllAndOverride()` to inspect metadata across both handler-level and class-level decorators to make dynamic authorization and auditing decisions.
+
+### Q5: How do Dynamic Modules differ from Static Modules?
+**Answer**:
+- **Static Modules**: Define fixed providers, controllers, and imports at compile time via `@Module({ ... })`.
+- **Dynamic Modules**: Return a `DynamicModule` configuration object at runtime via static methods (`register()`, `forRoot()`, `forRootAsync()`). This allows modules to accept configuration options dynamically (e.g. API keys, database credentials) and configure asynchronous providers before the dependency graph finishes bootstrapping.
+
+### Q6: What is the difference between `@MessagePattern` and `@EventPattern` in NestJS Microservices?
+**Answer**:
+- **`@MessagePattern('topic')`**: Implements the **Request-Response** pattern. The client emits a message and awaits an asynchronous return payload from the handler.
+- **`@EventPattern('topic')`**: Implements the **Event-Driven (Publish-Subscribe)** pattern. The producer emits an event in a fire-and-forget fashion and does not await a response.
+
+### Q7: How does NestJS resolve Circular Dependencies between services?
+**Answer**:
+NestJS resolves circular dependencies using the `forwardRef()` utility function on both sides of the injection:
+```typescript
+@Inject(forwardRef(() => OtherService))
+private readonly otherService: OtherService
+```
+`forwardRef()` wraps the class reference in a closure, deferring reference resolution until both classes have been defined by the JavaScript runtime.
+
+### Q8: What does `{ whitelist: true, forbidNonWhitelisted: true }` do in `ValidationPipe`?
+**Answer**:
+- `whitelist: true`: Automatically strips away any properties from the incoming request body that do not have class-validator decorators defined in the target DTO.
+- `forbidNonWhitelisted: true`: Instead of silently stripping unknown properties, it throws an immediate `400 Bad Request` validation error, preventing malicious users from submitting unexpected parameters.
+
+### Q9: What is the difference between `ExecutionContext` and `ArgumentsHost`?
+**Answer**:
+- `ArgumentsHost`: A generic interface providing access to arguments passed to a handler across different execution contexts (`switchToHttp()`, `switchToWs()`, `switchToRpc()`).
+- `ExecutionContext`: Inherits from `ArgumentsHost` and adds two crucial methods: `getClass<T>()` (returns the controller class) and `getHandler()` (returns a reference to the specific route handler method).
+
+### Q10: How does NestJS handle Database Transactions with Prisma?
+**Answer**:
+Prisma manages transactions via its interactive transaction API: `prisma.$transaction(async (tx) => { ... })`. In NestJS, you inject the `PrismaService` into your domain service and execute transactional business operations inside the callback, ensuring all queries share the same transactional connection.
+
+### Q11: How do Sagas work in `@nestjs/cqrs`?
+**Answer**:
+A Saga is a long-running distributed transaction listener implemented as an RxJS stream. It listens to domain events published to the `EventBus`, filters them using `ofType(EventClass)`, and maps them into one or more new commands dispatched to the `CommandBus`, coordinating multi-step business workflows without tight coupling.
+
+### Q12: Why should you use `LoggerModule.forRoot()` (Pino) instead of `new Logger()`?
+**Answer**:
+The built-in NestJS `Logger` formats logs as human-readable colorized strings, which are expensive to parse in production log aggregators. `nestjs-pino` outputs high-performance, asynchronous structured JSON streams that include request correlation IDs, HTTP latency metrics, and stack traces, which can be directly indexed by Elasticsearch and Datadog.
+
+### Q13: How does BullMQ prevent duplicate job execution in NestJS?
+**Answer**:
+BullMQ allows jobs to be submitted with a unique `jobId`. If a producer attempts to add a job with an ID that already exists in the queue, BullMQ deduplicates the request and ignores the duplicate addition, preventing duplicate credit charges or notifications.
+
+### Q14: What is the role of an Exception Filter in NestJS?
+**Answer**:
+Exception Filters catch unhandled exceptions thrown across the application. By implementing `ExceptionFilter` and decorating with `@Catch()`, engineers can intercept exceptions, map error types to standardized HTTP status codes, and emit RFC 7807 Problem Details responses.
+
+### Q15: How can a single NestJS instance function as a Hybrid Application?
+**Answer**:
+By invoking `app.connectMicroservice<MicroserviceOptions>({ ... })` on an existing HTTP application instance and running `await app.startAllMicroservices()`, the NestJS process concurrently binds to HTTP socket ports and subscribes to external message broker transits (e.g., NATS, Kafka), enabling API Gateways to process both ingress REST traffic and backend queue messages in a single runtime.
+
+---
+
+## NestJS CLI & Configuration Reference Cheat Sheet
+
+### Essential Nest CLI Generation Commands
 
 ```bash
-npm run test
+# Generate complete feature resource with CRUD, DTOs, and tests
+nest g resource modules/orders --no-spec
+
+# Generate individual architectural primitives
+nest g module modules/payments
+nest g service modules/payments
+nest g controller modules/payments
+nest g guard common/guards/auth
+nest g interceptor common/interceptors/logging
+nest g filter common/filters/http-exception
 ```
+
+### Production Package Installation Suite
+
+```bash
+# Core Enterprise Dependencies
+npm install @nestjs/config @nestjs/throttler @nestjs/passport passport passport-jwt
+npm install class-validator class-transformer nestjs-pino pino-http
+npm install @prisma/client @nestjs/bullmq bullmq
+
+# Performance Adapter
+npm install @nestjs/platform-fastify
+```
+
+---
+
+## Contributing & Architecture Guidelines
+
+1. All services must default to `Scope.DEFAULT` (Singleton) unless request scoping is strictly unavoidable.
+2. Every external network endpoint must be guarded by a `ValidationPipe` with strict DTO definitions.
+3. Microservices must communicate via strongly typed contracts using `@MessagePattern` and `@EventPattern`.
+
+---
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Connect with me
-
-- [Twitter](https://twitter.com/manthan_ank)
-- [LinkedIn](https://www.linkedin.com/in/manthanank)
-- [Facebook](https://www.facebook.com/manthanank/)
-- [Instagram](https://www.instagram.com/manthan_ank/)
-- [YouTube](https://www.youtube.com/@manthanank)
-- [GitHub](https://github.com/manthanank)
-
-## Support
-
-If you like this learning repository and find it useful, consider buying me a coffee or sponsoring me through the GitHub Sponsor. Your support will help me to continue and bring more exciting projects. Thank you!
-
-[![Buy Me A Coffee](/assets/bmc-button.svg)](https://www.buymeacoffee.com/manthanank)
-
-[![Sponsor Me](https://img.shields.io/badge/Sponsor-GitHub-green)]([https://](https://github.com/sponsors/manthanank))
-
----
-
-Show your support by 🌟 the repository.
-
----
+This architecture curriculum and repository is licensed under the [MIT License](LICENSE).
